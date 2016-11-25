@@ -498,7 +498,7 @@ span p = go []
   go :: Array a -> Array a -> { init :: Array a, rest :: Array a }
   go acc xs =
     case uncons xs of
-      Just { head: x, tail: xs } | p x -> go (x : acc) xs
+      Just { head: x, tail: xs' } | p x -> go (x : acc) xs'
       _ -> { init: reverse acc, rest: xs }
 
 -- | Group equal, consecutive elements of an array into arrays.
@@ -563,7 +563,7 @@ delete = deleteBy eq
 -- | under the equivalence relation provided in the first argument, creating a
 -- | new array.
 deleteBy :: forall a. (a -> a -> Boolean) -> a -> Array a -> Array a
-deleteBy _  _ [] = []
+deleteBy _  _ ys | null ys = []
 deleteBy eq x ys = maybe ys (\i -> unsafePartial $ fromJust (deleteAt i ys)) (findIndex (eq x) ys)
 
 -- | Delete the first occurrence of each element in the second array from the

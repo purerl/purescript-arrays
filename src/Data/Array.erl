@@ -5,35 +5,34 @@
 %  Array creation --------------------------------------------------------------
 % ------------------------------------------------------------------------------
 
-range(Start, End) = array:from_list(list:seq(Start, End)).
+range(Start, End) -> array:from_list(lists:seq(Start, End, case End < Start of true -> -1; false -> 1 end)).
 
-replicate(N, X) = array:new(N, {default, X}).
+replicate(N, X) -> array:new(max(N,0), {default, X}).
 
-fromFoldableImpl(Foldr,Xs) =
-  array:from_list( ((Foldr(fun (H) -> fun (T) -> [H|T]))([]))(Xs) ).
+fromFoldableImpl(Foldr,Xs) -> array:from_list( ((Foldr(fun (H) -> fun (T) -> [H|T] end end))([]))(Xs) ).
 
 
 % ------------------------------------------------------------------------------
 %  Array size ------------------------------------------------------------------
 % ------------------------------------------------------------------------------
 
-length(Xs) = array:size(Xs).
+length(Xs) -> array:size(Xs).
 
 % ------------------------------------------------------------------------------
 %  Extending arrays ------------------------------------------------------------
 % ------------------------------------------------------------------------------
 
-cons(E,L) = array:from_list([E|array:to_list(L)]).
+cons(E,L) -> array:from_list([E|array:to_list(L)]).
 
-cons(L,E) = array:set(array:size(L), E, L).
+snoc(L,E) -> array:set(array:size(L), E, L).
 
 % ------------------------------------------------------------------------------
 %  Non-indexed reads -----------------------------------------------------------
 % ------------------------------------------------------------------------------
 
-'uncons\''(Empty, Next, Xs) =
-  case size(Xs) of
-    0 -> Empty(unit),
+'uncons\''(Empty, Next, Xs) ->
+  case array:size(Xs) of
+    0 -> Empty(unit);
     _ -> (Next(array:get(0, Xs)))(array:from_list(tl(array:to_list(Xs))))
   end.
 
@@ -41,157 +40,115 @@ cons(L,E) = array:set(array:size(L), E, L).
 %  Indexed operations ----------------------------------------------------------
 % ------------------------------------------------------------------------------
 
-indexImpl(Just,Nothing,Xs,I) =
-  case i < 0 orelse i >= size(Xs) of
-    true -> Nothing
+indexImpl(Just,Nothing,Xs,I) ->
+  case I < 0 orelse I >= array:size(Xs) of
+    true -> Nothing;
     false -> Just(array:get(I,Xs))
   end.
 
-findIndexImpl(Just,Nothing,F,Xs) =
+findIndexImpl(Just,Nothing,F,Xs) ->
   begin
-    N = size(Xs),
-    Find = fun (I) when I>=N -> Nothing;
-      (I) when F(I) -> Just(I);
-      Find(I) -> Find(I+1)
+    N = array:size(Xs) - 1,
+    Find = fun
+      Find(I) when I>N -> Nothing;
+      Find(I) -> case F(array:get(I,Xs)) of
+        true -> Just(I);
+        false -> Find(I+1)
+      end
     end,
     Find(0)
   end.
 
-findLastIndexImpl(Just,Nothing,F,Xs) =
+findLastIndexImpl(Just,Nothing,F,Xs) ->
   begin
-    Find = fun (I) when I<=0 -> Nothing;
-      (I) when F(I) -> Just(I);
-      Find(I) -> Find(I-1)
+    Find = fun
+      Find(I) when I < 0 -> Nothing;
+      Find(I) -> case F(array:get(I,Xs)) of
+        true -> Just(I);
+        false -> Find(I-1)
+      end
     end,
-    Find(size(Xs) - 1)
+    Find(array:size(Xs) - 1)
   end.
 
-% exports._insertAt = function (just) {
-%   return function (nothing) {
-%     return function (i) {
-%       return function (a) {
-%         return function (l) {
-%           if (i < 0 || i > l.length) return nothing;
-%           var l1 = l.slice();
-%           l1.splice(i, 0, a);
-%           return just(l1);
-%         };
-%       };
-%     };
-%   };
-% };
-%
-% exports._deleteAt = function (just) {
-%   return function (nothing) {
-%     return function (i) {
-%       return function (l) {
-%         if (i < 0 || i >= l.length) return nothing;
-%         var l1 = l.slice();
-%         l1.splice(i, 1);
-%         return just(l1);
-%       };
-%     };
-%   };
-% };
+'_insertAt'(Just,Nothing,I,A,L) ->
+  Size = array:size(L),
+  InsertF = fun
+    InsertF(LL, J) when J > Size -> LL;
+    InsertF(LL, J) when J =:= I -> InsertF(array:set(J, A, LL), J+1);
+    InsertF(LL, J) when J > I -> InsertF(array:set(J, array:get(J-1, L), LL), J+1)
+  end,
+  case I < 0 orelse I > Size of
+    true -> Nothing;
+    false -> Just(InsertF(L, I))
+  end.
+
+'_deleteAt'(Just,Nothing,I,L) ->
+  Size = array:size(L),
+  DeleteF = fun
+    DeleteF(LL, J) when J-1 > Size -> LL;
+    DeleteF(LL, J) when J >= I -> DeleteF(array:set(J, array:get(J+1, L), LL), J+1)
+  end,
+  case I < 0 orelse I > Size - 1 of
+    true -> Nothing;
+    false -> Just(array:resize(Size-1, DeleteF(L, I)))
+  end.
 
 '_updateAt'(Just,Nothing,I,A,L) ->
-  case I < 0 orelse I >= Size(L) of
-    true -> Nothing
+  case I < 0 orelse I >= array:size(L) of
+    true -> Nothing;
     false -> Just(array:set(I, A, L))
   end.
 
-//------------------------------------------------------------------------------
-// Transformations -------------------------------------------------------------
-//------------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% Transformations -------------------------------------------------------------
+%%------------------------------------------------------------------------------
 
-reverse(L) = array:from_list(lists:reverse(array:to_list(L))).
+reverse(L) -> array:from_list(lists:reverse(array:to_list(L))).
 
+concat(Ls) -> array:from_list(lists:append(array:to_list(array:map(fun (_, X) -> array:to_list(X) end, Ls)))).
 
-%
-% exports.concat = function (xss) {
-%   var result = [];
-%   for (var i = 0, l = xss.length; i < l; i++) {
-%     var xs = xss[i];
-%     for (var j = 0, m = xs.length; j < m; j++) {
-%       result.push(xs[j]);
-%     }
-%   }
-%   return result;
-% };
-%
-% exports.filter = function (f) {
-%   return function (xs) {
-%     return xs.filter(f);
-%   };
-% };
-%
-% exports.partition = function (f) {
-%   return function (xs) {
-%     var yes = [];
-%     var no  = [];
-%     for (var i = 0; i < xs.length; i++) {
-%       var x = xs[i];
-%       if (f(x))
-%         yes.push(x);
-%       else
-%         no.push(x);
-%     }
-%     return { yes: yes, no: no };
-%   };
-% };
-%
-% //------------------------------------------------------------------------------
-% // Sorting ---------------------------------------------------------------------
-% //------------------------------------------------------------------------------
-%
-% exports.sortImpl = function (f) {
-%   return function (l) {
-%     // jshint maxparams: 2
-%     return l.slice().sort(function (x, y) {
-%       return f(x)(y);
-%     });
-%   };
-% };
-%
-% //------------------------------------------------------------------------------
-% // Subarrays -------------------------------------------------------------------
-% //------------------------------------------------------------------------------
-%
-% exports.slice = function (s) {
-%   return function (e) {
-%     return function (l) {
-%       return l.slice(s, e);
-%     };
-%   };
-% };
-%
-% exports.take = function (n) {
-%   return function (l) {
-%     return n < 1 ? [] : l.slice(0, n);
-%   };
-% };
-%
-% exports.drop = function (n) {
-%   return function (l) {
-%     return n < 1 ? l : l.slice(n);
-%   };
-% };
-%
-% //------------------------------------------------------------------------------
-% // Zipping ---------------------------------------------------------------------
-% //------------------------------------------------------------------------------
-%
-% exports.zipWith = function (f) {
-%   return function (xs) {
-%     return function (ys) {
-%       var l = xs.length < ys.length ? xs.length : ys.length;
-%       var result = new Array(l);
-%       for (var i = 0; i < l; i++) {
-%         result[i] = f(xs[i])(ys[i]);
-%       }
-%       return result;
-%     };
-%   };
-% };
+filter(F,L) -> array:from_list([X || X <- array:to_list(L), F(X)]).
+
+partition(F,A) -> begin
+  {Yes, No} = lists:partition(F, array:to_list(A)),
+  #{yes => array:from_list(Yes), no => array:from_list(No)}
+end.
+
+% ------------------------------------------------------------------------------
+%  Sorting ---------------------------------------------------------------------
+% ------------------------------------------------------------------------------
+
+sortImpl(F,A) -> array:from_list(lists:sort(fun (X, Y) -> case (F(X))(Y) of 1 -> false; _ -> true end end, array:to_list(A))).
+
+% ------------------------------------------------------------------------------
+%  Subarrays -------------------------------------------------------------------
+% ------------------------------------------------------------------------------
+
+slice(S,E,L) -> array:from_list(lists:sublist(array:to_list(L), S+1, E-S)).
+
+take(N,L) -> case {N < 1, N > array:size(L)} of
+  {true, _} -> array:from_list([]);
+  {_, true} -> L;
+  {false,_} -> begin
+    {Head, _} = lists:split(N,array:to_list(L)),
+    array:from_list(Head)
+  end
+end.
+
+drop(N,L) -> case {N < 1, N > array:size(L)} of
+  {true,_} -> L;
+  {_, true} -> array:from_list([]);
+  {false,_} -> begin
+    {_, Tail} = lists:split(N,array:to_list(L)),
+    array:from_list(Tail)
+  end
+end.
+
+% ------------------------------------------------------------------------------
+%  Zipping ---------------------------------------------------------------------
+% ------------------------------------------------------------------------------
+
+zipWith(F,Xs,Ys) -> array:from_list(lists:zipwith(fun (X, Y) -> (F(X))(Y) end, array:to_list(Xs), array:to_list(Ys))).
 
 unsafeIndexImpl(A,N) -> array:get(N,A).

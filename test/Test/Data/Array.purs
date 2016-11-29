@@ -96,7 +96,7 @@ testArray = do
   log "tail should return Nothing for an empty array"
   assert $ tail nil == Nothing
 
-  log "init should return a Just-wrapped array containing all the items in an array apart from the first for a non-empty array"
+  log "init should return a Just-wrapped array containing all the items in an array apart from the last for a non-empty array"
   assert $ init ["foo", "bar", "baz"] == Just ["foo", "bar"]
 
   log "init should return Nothing for an empty array"
@@ -136,6 +136,7 @@ testArray = do
 
   log "findLastIndex should return the last index of an item in an array"
   assert $ (findLastIndex (_ /= 1) [2, 1, 2]) == Just 2
+  assert $ (findLastIndex (_ /= 1) [2, 1, 1]) == Just 0
   assert $ (findLastIndex (_ == 3) [2, 1, 2]) == Nothing
 
   log "insertAt should add an item at the specified index"

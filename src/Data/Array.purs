@@ -49,6 +49,7 @@ module Data.Array
   , tail
   , init
   , uncons
+  , unsnoc
 
   , (!!), index
   , elemIndex
@@ -66,6 +67,7 @@ module Data.Array
   , concatMap
   , filter
   , partition
+  , filterA
   , filterM
   , mapMaybe
   , catMaybes
@@ -109,29 +111,31 @@ module Data.Array
   ) where
 
 import Prelude
-
 import Control.Alt ((<|>))
 import Control.Alternative (class Alternative)
 import Control.Lazy (class Lazy, defer)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM2)
-
 import Data.Foldable (class Foldable, foldl, foldr)
 import Data.Foldable (foldl, foldr, foldMap, fold, intercalate, elem, notElem, find, findMap, any, all) as Exports
 import Data.Maybe (Maybe(..), maybe, isJust, fromJust)
 import Data.NonEmpty (NonEmpty, (:|))
 import Data.Traversable (scanl, scanr) as Exports
-import Data.Traversable (sequence)
+import Data.Traversable (sequence, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Unfoldable (class Unfoldable, unfoldr)
-
 import Partial.Unsafe (unsafePartial)
 
 -- | Convert an `Array` into an `Unfoldable` structure.
-toUnfoldable :: forall f a. Unfoldable f => Array a -> f a
-toUnfoldable = unfoldr $ uncons' (const Nothing) (\h t -> Just (Tuple h t))
+toUnfoldable :: forall f. Unfoldable f => Array ~> f
+toUnfoldable xs = unfoldr f 0
+  where
+  len = length xs
+  f i
+    | i < len   = Just (Tuple (unsafePartial (unsafeIndex xs i)) (i+1))
+    | otherwise = Nothing
 
 -- | Convert a `Foldable` structure into an `Array`.
-fromFoldable :: forall f a. Foldable f => f a -> Array a
+fromFoldable :: forall f. Foldable f => f ~> Array
 fromFoldable = fromFoldableImpl foldr
 
 foreign import fromFoldableImpl
@@ -219,7 +223,7 @@ insertBy cmp x ys =
 -- |
 -- | Running time: `O(1)`.
 head :: forall a. Array a -> Maybe a
-head = uncons' (const Nothing) (\x _ -> Just x)
+head xs = xs !! 0
 
 -- | Get the last element in an array, or `Nothing` if the array is empty
 -- |
@@ -266,6 +270,12 @@ foreign import uncons'
   -> (a -> Array a -> b)
   -> Array a
   -> b
+
+-- | Break an array into its last element and all preceding elements.
+-- |
+-- | Running time: `O(n)` where `n` is the length of the array
+unsnoc :: forall a. Array a -> Maybe { init :: Array a, last :: a }
+unsnoc xs = { init: _, last: _ } <$> init xs <*> last xs
 
 --------------------------------------------------------------------------------
 -- Indexed operations ----------------------------------------------------------
@@ -405,17 +415,20 @@ foreign import partition
   -> Array a
   -> { yes :: Array a, no :: Array a }
 
--- | Filter where the predicate returns a monadic `Boolean`.
+-- | Filter where the predicate returns a `Boolean` in some `Applicative`.
 -- |
 -- | ```purescript
--- | powerSet :: forall a. [a] -> [[a]]
--- | powerSet = filterM (const [true, false])
+-- | powerSet :: forall a. Array a -> Array (Array a)
+-- | powerSet = filterA (const [true, false])
 -- | ```
+filterA :: forall a f. Applicative f => (a -> f Boolean) -> Array a -> f (Array a)
+filterA p =
+  traverse (\x -> Tuple x <$> p x)
+  >>> map (mapMaybe (\(Tuple x b) -> if b then Just x else Nothing))
+
+-- | Deprecated alias for `filterA`.
 filterM :: forall a m. Monad m => (a -> m Boolean) -> Array a -> m (Array a)
-filterM p = uncons' (\_ -> pure []) \x xs -> do
-  b <- p x
-  xs' <- filterM p xs
-  pure if b then x : xs' else xs'
+filterM = filterA
 
 -- | Apply a function to each element in an array, keeping only the results
 -- | which contain a value, creating a new array.
@@ -481,25 +494,37 @@ dropWhile p xs = (span p xs).rest
 
 -- | Split an array into two parts:
 -- |
--- | 1. the longest initial subarray for which all element satisfy the specified
--- |    predicate
+-- | 1. the longest initial subarray for which all elements satisfy the
+-- |    specified predicate
 -- | 2. the remaining elements
 -- |
 -- | ```purescript
 -- | span (\n -> n % 2 == 1) [1,3,2,4,5] == { init: [1,3], rest: [2,4,5] }
 -- | ```
+-- |
+-- | Running time: `O(n)`.
 span
   :: forall a
    . (a -> Boolean)
   -> Array a
   -> { init :: Array a, rest :: Array a }
-span p = go []
+span p arr =
+  case breakIndex of
+    Just 0 ->
+      { init: [], rest: arr }
+    Just i ->
+      { init: slice 0 i arr, rest: slice i (length arr) arr }
+    Nothing ->
+      { init: arr, rest: [] }
   where
-  go :: Array a -> Array a -> { init :: Array a, rest :: Array a }
-  go acc xs =
-    case uncons xs of
-      Just { head: x, tail: xs' } | p x -> go (x : acc) xs'
-      _ -> { init: reverse acc, rest: xs }
+  breakIndex = go 0
+  go i =
+    -- This looks like a good opportunity to use the Monad Maybe instance,
+    -- but it's important to write out an explicit case expression here in
+    -- order to ensure that TCO is triggered.
+    case index arr i of
+      Just x -> if p x then go (i+1) else Just i
+      Nothing -> Nothing
 
 -- | Group equal, consecutive elements of an array into arrays.
 -- |
@@ -529,6 +554,7 @@ groupBy op = go []
       in go ((o.head :| sp.init) : acc) sp.rest
     Nothing -> reverse acc
 
+
 -- | Remove the duplicates from an array, creating a new array.
 nub :: forall a. Eq a => Array a -> Array a
 nub = nubBy eq
@@ -556,6 +582,8 @@ unionBy eq xs ys = xs <> foldl (flip (deleteBy eq)) (nubBy eq ys) xs
 
 -- | Delete the first element of an array which is equal to the specified value,
 -- | creating a new array.
+-- |
+-- | Running time: `O(n)`
 delete :: forall a. Eq a => a -> Array a -> Array a
 delete = deleteBy eq
 
@@ -568,10 +596,11 @@ deleteBy eq x ys = maybe ys (\i -> unsafePartial $ fromJust (deleteAt i ys)) (fi
 
 -- | Delete the first occurrence of each element in the second array from the
 -- | first array, creating a new array.
+-- |
+-- | Running time: `O(n*m)`, where n is the length of the first array, and m is
+-- | the length of the second.
 difference :: forall a. Eq a => Array a -> Array a -> Array a
-difference xs ys
-  | null xs = []
-  | otherwise = uncons' (const xs) (\z zs -> delete z xs \\ zs) ys
+difference = foldr delete
 
 infix 5 difference as \\
 

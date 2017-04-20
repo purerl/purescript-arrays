@@ -20,6 +20,7 @@
     "purescript-partial": "git://github.com/purerl/purescript-partial.git#master",
     "purescript-tailrec": "^2.0.0",
     "purescript-unfoldable": "git://github.com/purerl/purescript-unfoldable.git#master"
+    "purescript-unsafe-coerce": "^2.0.0"
   },
   "devDependencies": {
     "purescript-assert": "git://github.com/purerl/purescript-assert.git#master",

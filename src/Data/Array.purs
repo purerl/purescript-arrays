@@ -59,7 +59,9 @@ module Data.Array
   , insertAt
   , deleteAt
   , updateAt
+  , updateAtIndices
   , modifyAt
+  , modifyAtIndices
   , alterAt
 
   , reverse
@@ -68,14 +70,13 @@ module Data.Array
   , filter
   , partition
   , filterA
-  , filterM
   , mapMaybe
   , catMaybes
   , mapWithIndex
 
   , sort
   , sortBy
-
+  , sortWith
   , slice
   , take
   , takeWhile
@@ -111,17 +112,18 @@ module Data.Array
   ) where
 
 import Prelude
+
 import Control.Alt ((<|>))
 import Control.Alternative (class Alternative)
 import Control.Lazy (class Lazy, defer)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM2)
-import Data.Foldable (class Foldable, foldl, foldr)
+import Data.Foldable (class Foldable, foldl, foldr, traverse_)
 import Data.Foldable (foldl, foldr, foldMap, fold, intercalate, elem, notElem, find, findMap, any, all) as Exports
-import Data.Maybe (Maybe(..), maybe, isJust, fromJust)
+import Data.Maybe (Maybe(..), fromJust, fromMaybe, isJust, maybe)
 import Data.NonEmpty (NonEmpty, (:|))
 import Data.Traversable (scanl, scanr) as Exports
 import Data.Traversable (sequence, traverse)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), uncurry)
 import Data.Unfoldable (class Unfoldable, unfoldr)
 import Partial.Unsafe (unsafePartial)
 
@@ -161,7 +163,7 @@ infix 8 range as ..
 -- |
 -- | The `Lazy` constraint is used to generate the result lazily, to ensure
 -- | termination.
-some :: forall f a. (Alternative f, Lazy (f (Array a))) => f a -> f (Array a)
+some :: forall f a. Alternative f => Lazy (f (Array a)) => f a -> f (Array a)
 some v = (:) <$> v <*> defer (\_ -> many v)
 
 -- | Attempt a computation multiple times, returning as many successful results
@@ -169,7 +171,7 @@ some v = (:) <$> v <*> defer (\_ -> many v)
 -- |
 -- | The `Lazy` constraint is used to generate the result lazily, to ensure
 -- | termination.
-many :: forall f a. (Alternative f, Lazy (f (Array a))) => f a -> f (Array a)
+many :: forall f a. Alternative f => Lazy (f (Array a)) => f a -> f (Array a)
 many v = some v <|> pure []
 
 --------------------------------------------------------------------------------
@@ -426,10 +428,6 @@ filterA p =
   traverse (\x -> Tuple x <$> p x)
   >>> map (mapMaybe (\(Tuple x b) -> if b then Just x else Nothing))
 
--- | Deprecated alias for `filterA`.
-filterM :: forall a m. Monad m => (a -> m Boolean) -> Array a -> m (Array a)
-filterM = filterA
-
 -- | Apply a function to each element in an array, keeping only the results
 -- | which contain a value, creating a new array.
 mapMaybe :: forall a b. (a -> Maybe b) -> Array a -> Array b
@@ -447,6 +445,17 @@ mapWithIndex :: forall a b. (Int -> a -> b) -> Array a -> Array b
 mapWithIndex f xs =
   zipWith f (range 0 (length xs - 1)) xs
 
+-- | Change the elements at the specified indices in index/value pairs.
+-- | Out-of-bounds indices will have no effect.
+updateAtIndices :: forall t a. Foldable t => t (Tuple Int a) -> Array a -> Array a
+updateAtIndices us xs =
+  foldl (\xs' (Tuple i x) -> fromMaybe xs' (updateAt i x xs')) xs us
+
+-- | Apply a function to the element at the specified indices,
+-- | creating a new array. Out-of-bounds indices will have no effect.
+modifyAtIndices :: forall t a. Foldable t => t Int -> (a -> a) -> Array a -> Array a
+modifyAtIndices is f xs =
+  foldl (\xs' i -> fromMaybe xs' (modifyAt i f xs')) xs is
 
 --------------------------------------------------------------------------------
 -- Sorting ---------------------------------------------------------------------
@@ -465,6 +474,11 @@ sortBy comp xs = sortImpl comp' xs
     GT -> 1
     EQ -> 0
     LT -> -1
+
+-- | Sort the elements of an array in increasing order, where elements are
+-- | sorted based on a projection
+sortWith :: forall a b. Ord b => (a -> b) -> Array a -> Array a
+sortWith f = sortBy (comparing f)
 
 foreign import sortImpl :: forall a. (a -> a -> Int) -> Array a -> Array a
 
@@ -523,7 +537,7 @@ span p arr =
     -- but it's important to write out an explicit case expression here in
     -- order to ensure that TCO is triggered.
     case index arr i of
-      Just x -> if p x then go (i+1) else Just i
+      Just x -> if p x then go (i + 1) else Just i
       Nothing -> Nothing
 
 -- | Group equal, consecutive elements of an array into arrays.
@@ -645,8 +659,8 @@ zipWithA
   -> m (Array c)
 zipWithA f xs ys = sequence (zipWith f xs ys)
 
--- | Rakes two lists and returns a list of corresponding pairs.
--- | If one input list is short, excess elements of the longer list are
+-- | Takes two arrays and returns an array of corresponding pairs.
+-- | If one input array is short, excess elements of the longer array are
 -- | discarded.
 zip :: forall a b. Array a -> Array b -> Array (Tuple a b)
 zip = zipWith Tuple

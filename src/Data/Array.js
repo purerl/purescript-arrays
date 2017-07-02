@@ -8,15 +8,27 @@ exports.range = function (start) {
   return function (end) {
     var step = start > end ? -1 : 1;
     var result = [];
-    for (var i = start, n = 0; i !== end; i += step) {
+    var i = start, n = 0;
+    while (i !== end) {
       result[n++] = i;
+      i += step;
     }
     result[n] = i;
     return result;
   };
 };
 
-exports.replicate = function (count) {
+var replicate = function (count) {
+  return function (value) {
+    if (count < 1) {
+      return [];
+    }
+    var result = new Array(count);
+    return result.fill(value);
+  };
+};
+
+var replicatePolyfill = function (count) {
   return function (value) {
     var result = [];
     var n = 0;
@@ -26,6 +38,11 @@ exports.replicate = function (count) {
     return result;
   };
 };
+
+// In browsers that have Array.prototype.fill we use it, as it's faster.
+exports.replicate = typeof Array.prototype.fill === "function" ?
+    replicate :
+    replicatePolyfill;
 
 exports.fromFoldableImpl = (function () {
   // jshint maxparams: 2
@@ -44,9 +61,10 @@ exports.fromFoldableImpl = (function () {
   function listToArray(list) {
     var result = [];
     var count = 0;
-    while (list !== emptyList) {
-      result[count++] = list.head;
-      list = list.tail;
+    var xs = list;
+    while (xs !== emptyList) {
+      result[count++] = xs.head;
+      xs = xs.tail;
     }
     return result;
   }
@@ -188,6 +206,12 @@ exports.reverse = function (l) {
 };
 
 exports.concat = function (xss) {
+  if (xss.length <= 10000) {
+    // This method is faster, but it crashes on big arrays.
+    // So we use it when can and fallback to simple variant otherwise.
+    return Array.prototype.concat.apply([], xss);
+  }
+
   var result = [];
   for (var i = 0, l = xss.length; i < l; i++) {
     var xs = xss[i];

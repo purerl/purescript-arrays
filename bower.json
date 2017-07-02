@@ -16,25 +16,18 @@
     "package.json"
   ],
   "dependencies": {
-    "purescript-foldable-traversable": "git://github.com/purerl/purescript-foldable-traversable.git#master",
-    "purescript-partial": "git://github.com/purerl/purescript-partial.git#master",
-    "purescript-tailrec": "^2.0.0",
-    "purescript-unfoldable": "git://github.com/purerl/purescript-unfoldable.git#master"
-    "purescript-unsafe-coerce": "^2.0.0"
+    "purescript-foldable-traversable": "^3.0.0",
+    "purescript-nonempty": "^4.0.0",
+    "purescript-partial": "^1.2.0",
+    "purescript-st": "^3.0.0",
+    "purescript-tailrec": "^3.0.0",
+    "purescript-tuples": "^4.0.0",
+    "purescript-unfoldable": "^3.0.0",
+    "purescript-unsafe-coerce": "^3.0.0"
   },
   "devDependencies": {
-    "purescript-assert": "git://github.com/purerl/purescript-assert.git#master",
-    "purescript-console": "git://github.com/purerl/purescript-console.git#master"
-  },
-  "resolutions": {
-    "purescript-foldable-traversable": "master",
-    "purescript-prelude": "master",
-    "purescript-partial": "master",
-    "purescript-bifunctors": "^2.0.0",
-    "purescript-maybe": "^2.0.0",
-    "purescript-eff": "master",
-    "purescript-control": "^2.0.0",
-    "purescript-monoid": "^2.0.0",
-    "purescript-invariant": "^2.0.0"
+    "purescript-assert": "^3.0.0",
+    "purescript-console": "^3.0.0",
+    "purescript-const": "^3.0.0"
   }
 }

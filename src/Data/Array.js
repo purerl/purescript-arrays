@@ -7,7 +7,7 @@
 exports.range = function (start) {
   return function (end) {
     var step = start > end ? -1 : 1;
-    var result = [];
+    var result = new Array(step * (end - start) + 1);
     var i = start, n = 0;
     while (i !== end) {
       result[n++] = i;
@@ -40,12 +40,9 @@ var replicatePolyfill = function (count) {
 };
 
 // In browsers that have Array.prototype.fill we use it, as it's faster.
-exports.replicate = typeof Array.prototype.fill === "function" ?
-    replicate :
-    replicatePolyfill;
+exports.replicate = typeof Array.prototype.fill === "function" ? replicate : replicatePolyfill;
 
 exports.fromFoldableImpl = (function () {
-  // jshint maxparams: 2
   function Cons(head, tail) {
     this.head = head;
     this.tail = tail;
@@ -249,7 +246,6 @@ exports.partition = function (f) {
 
 exports.sortImpl = function (f) {
   return function (l) {
-    // jshint maxparams: 2
     return l.slice().sort(function (x, y) {
       return f(x)(y);
     });

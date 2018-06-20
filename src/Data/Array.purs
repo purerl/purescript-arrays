@@ -122,9 +122,9 @@ import Control.Alternative (class Alternative)
 import Control.Lazy (class Lazy, defer)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM2)
 import Data.Array.NonEmpty.Internal (NonEmptyArray)
-import Data.Foldable (class Foldable, foldl, foldr, traverse_)
+import Data.Foldable (class Foldable, foldl, foldr)
 import Data.Foldable (foldl, foldr, foldMap, fold, intercalate, elem, notElem, find, findMap, any, all) as Exports
-import Data.Maybe (Maybe(..), maybe, isJust, fromJust)
+import Data.Maybe (Maybe(..), maybe, isJust, fromJust, fromMaybe)
 import Data.Traversable (scanl, scanr) as Exports
 import Data.Traversable (sequence, traverse)
 import Data.Tuple (Tuple(..), fst, snd)
@@ -850,14 +850,14 @@ group' = group <<< sort
 
 -- | Group equal, consecutive elements of an array into arrays, using the
 -- | specified equivalence relation to detemine equality.
-groupBy :: forall a. (a -> a -> Boolean) -> Array a -> Array (NonEmpty Array a)
+groupBy :: forall a. (a -> a -> Boolean) -> Array a -> Array (NonEmptyArray a)
 groupBy op = go []
   where
-  go :: Array (NonEmpty Array a) -> Array a -> Array (NonEmpty Array a)
+  go :: Array (NonEmptyArray a) -> Array a -> Array (NonEmptyArray a)
   go acc xs = case uncons xs of
     Just o ->
       let sp = span (op o.head) o.tail
-      in go ((o.head :| sp.init) : acc) sp.rest
+      in go (((unsafeCoerce :: Array ~> NonEmptyArray) (o.head : sp.init)) : acc) sp.rest
     Nothing -> reverse acc
 
 
@@ -891,14 +891,17 @@ nubEq = nubByEq eq
 nubBy :: forall a. (a -> a -> Ordering) -> Array a -> Array a
 nubBy comp xs = case head indexedAndSorted of
   Nothing -> []
-  Just x -> map snd $ sortWith fst $ ST.run do
-     -- TODO: use NonEmptyArrays here to avoid partial functions
-     result <- STA.unsafeThaw $ singleton x
-     ST.foreach indexedAndSorted \pair@(Tuple i x') -> do
-       lst <- snd <<< unsafePartial (fromJust <<< last) <$> STA.unsafeFreeze result
-       when (comp lst x' /= EQ) $ void $ STA.push pair result
-     STA.unsafeFreeze result
+  Just x -> map snd $ sortWith fst $ 
+    foldl go (singleton x) indexedAndSorted
   where
+  go :: Array (Tuple Int a) -> (Tuple Int a) -> Array (Tuple Int a)
+  go result pair@(Tuple i x') =
+    let lst = snd $ unsafePartial (fromJust <<< last) $ result
+    in if comp lst x' /= EQ
+      then pair : result
+      else result
+
+
   indexedAndSorted :: Array (Tuple Int a)
   indexedAndSorted = sortBy (\x y -> comp (snd x) (snd y))
                             (mapWithIndex Tuple xs)

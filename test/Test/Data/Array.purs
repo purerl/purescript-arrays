@@ -13,7 +13,7 @@ import Data.Unfoldable (replicateA)
 import Effect (Effect)
 import Effect.Console (log)
 import Partial.Unsafe (unsafePartial)
-import Test.Assert (assert)
+import Test.Assert (assert, assertEqual)
 
 testArray :: Effect Unit
 testArray = do
@@ -218,6 +218,9 @@ testArray = do
   log "mapWithIndex applies a function with an index for every element"
   assert $ A.mapWithIndex (\i x -> x - i) [9,8,7,6,5] == [9,7,5,3,1]
 
+  log "mapWithIndex on an empty list"
+  assertEqual { actual: A.mapWithIndex (\i x -> x - i) [], expected: [] }
+
   log "updateAtIndices changes the elements at specified indices"
   assert $ A.updateAtIndices
              [Tuple 0 false, Tuple 2 false, Tuple 8 false]
@@ -307,16 +310,16 @@ testArray = do
   assert $ A.groupBy (\x y -> odd x && odd y) [1, 1, 2, 2, 3, 3] == [nea [1, 1], NEA.singleton 2, NEA.singleton 2, nea [3, 3]]
 
   log "nub should remove duplicate elements from the list, keeping the first occurence"
-  assert $ A.nub [1, 2, 2, 3, 4, 1] == [1, 2, 3, 4]
+  assertEqual { actual: A.nub [1, 2, 2, 3, 4, 1], expected: [1, 2, 3, 4] }
 
   log "nub should preserve order"
-  assert $ A.nub [1, 3, 4, 2, 2, 1] == [1, 3, 4, 2]
+  assertEqual { actual: A.nub [1, 3, 4, 2, 2, 1], expected: [1, 3, 4, 2] }
 
   log "nubEq should remove duplicate elements from the list, keeping the first occurence"
-  assert $ A.nubEq [1, 2, 2, 3, 4, 1] == [1, 2, 3, 4]
+  assertEqual { actual: A.nubEq [1, 2, 2, 3, 4, 1], expected: [1, 2, 3, 4] }
 
   log "nubEq should preserve order"
-  assert $ A.nubEq [1, 3, 4, 2, 2, 1] == [1, 3, 4, 2]
+  assertEqual { actual: A.nubEq [1, 3, 4, 2, 2, 1], expected:  [1, 3, 4, 2]}
 
   log "nubBy should remove duplicate items from the list using a supplied predicate"
   assert $ A.nubBy compare [1, 3, 4, 2, 2, 1] == [1, 3, 4, 2]

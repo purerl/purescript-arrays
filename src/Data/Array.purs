@@ -643,8 +643,8 @@ catMaybes = mapMaybe identity
 -- | ```
 -- |
 mapWithIndex :: forall a b. (Int -> a -> b) -> Array a -> Array b
-mapWithIndex f xs =
-  zipWith f (range 0 (length xs - 1)) xs
+mapWithIndex _ [] = []
+mapWithIndex f xs = zipWith f (range 0 (length xs - 1)) xs
 
 -- | Change the elements at the specified indices in index/value pairs.
 -- | Out-of-bounds indices will have no effect.
@@ -896,7 +896,7 @@ nubBy comp xs = case head indexedAndSorted of
   where
   go :: Array (Tuple Int a) -> (Tuple Int a) -> Array (Tuple Int a)
   go result pair@(Tuple i x') =
-    let lst = snd $ unsafePartial (fromJust <<< last) $ result
+    let lst = snd $ unsafePartial (fromJust <<< head) $ result
     in if comp lst x' /= EQ
       then pair : result
       else result

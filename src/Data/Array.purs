@@ -52,8 +52,12 @@ module Data.Array
   , unsnoc
 
   , (!!), index
+  , elem
+  , notElem
   , elemIndex
   , elemLastIndex
+  , find
+  , findMap
   , findIndex
   , findLastIndex
   , insertAt
@@ -64,15 +68,24 @@ module Data.Array
   , modifyAtIndices
   , alterAt
 
+  , intersperse
   , reverse
   , concat
   , concatMap
   , filter
   , partition
+  , splitAt
   , filterA
   , mapMaybe
   , catMaybes
   , mapWithIndex
+  , foldl
+  , foldr
+  , foldMap
+  , fold
+  , intercalate
+  , scanl
+  , scanr
 
   , sort
   , sortBy
@@ -86,8 +99,10 @@ module Data.Array
   , dropWhile
   , span
   , group
+  , groupAll
   , group'
   , groupBy
+  , groupAllBy
 
   , nub
   , nubEq
@@ -107,12 +122,13 @@ module Data.Array
   , zip
   , unzip
 
+  , any
+  , all
+
   , foldM
   , foldRecM
 
   , unsafeIndex
-
-  , module Exports
   ) where
 
 import Prelude
@@ -121,15 +137,15 @@ import Control.Alt ((<|>))
 import Control.Alternative (class Alternative)
 import Control.Lazy (class Lazy, defer)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM2)
-import Data.Array.NonEmpty.Internal (NonEmptyArray)
-import Data.Foldable (class Foldable, foldl, foldr)
-import Data.Foldable (foldl, foldr, foldMap, fold, intercalate, elem, notElem, find, findMap, any, all) as Exports
-import Data.Maybe (Maybe(..), maybe, isJust, fromJust, fromMaybe)
-import Data.Traversable (scanl, scanr) as Exports
+import Data.Array.NonEmpty.Internal (NonEmptyArray(..))
+import Data.Foldable (class Foldable, traverse_)
+import Data.Foldable as F
+import Data.Maybe (Maybe(..), fromJust, isJust, isNothing, maybe, fromMaybe)
 import Data.Traversable (sequence, traverse)
 import Data.Tuple (Tuple(..), fst, snd)
 import Data.Unfoldable (class Unfoldable, unfoldr)
 import Partial.Unsafe (unsafePartial)
+import Prim.TypeError (class Warn, Text)
 import Unsafe.Coerce (unsafeCoerce)
 
 -- | Convert an `Array` into an `Unfoldable` structure.
@@ -149,7 +165,7 @@ toUnfoldable xs = unfoldr f 0
 -- | ```
 -- |
 fromFoldable :: forall f. Foldable f => f ~> Array
-fromFoldable = fromFoldableImpl foldr
+fromFoldable = fromFoldableImpl F.foldr
 
 foreign import fromFoldableImpl
   :: forall f a
@@ -226,7 +242,8 @@ foreign import length :: forall a. Array a -> Int
 -- | ```
 -- |
 -- | Note, the running time of this function is `O(n)`.
-foreign import cons :: forall a. a -> Array a -> Array a
+cons :: forall a. a -> Array a -> Array a
+cons x xs = [x] <> xs
 
 -- | An infix alias for `cons`.
 -- |
@@ -306,7 +323,7 @@ last xs = xs !! (length xs - 1)
 -- |
 -- | Running time: `O(n)` where `n` is the length of the array
 tail :: forall a. Array a -> Maybe (Array a)
-tail = uncons' (const Nothing) (\_ xs -> Just xs)
+tail = unconsImpl (const Nothing) (\_ xs -> Just xs)
 
 -- | Get all but the last element of an array, creating a new array, or
 -- | `Nothing` if the array is empty.
@@ -337,9 +354,9 @@ init xs
 -- |   Nothing -> somethingElse
 -- | ```
 uncons :: forall a. Array a -> Maybe { head :: a, tail :: Array a }
-uncons = uncons' (const Nothing) \x xs -> Just { head: x, tail: xs }
+uncons = unconsImpl (const Nothing) \x xs -> Just { head: x, tail: xs }
 
-foreign import uncons'
+foreign import unconsImpl
   :: forall a b
    . (Unit -> b)
   -> (a -> Array a -> b)
@@ -393,6 +410,14 @@ foreign import indexImpl
 -- |
 infixl 8 index as !!
 
+-- | Returns true if the array has the given element.
+elem :: forall a. Eq a => a -> Array a -> Boolean
+elem a arr = isJust $ elemIndex a arr
+
+-- | Returns true if the array does not have the given element.
+notElem :: forall a. Eq a => a -> Array a -> Boolean
+notElem a arr = isNothing $ elemIndex a arr
+
 -- | Find the index of the first element equal to the specified element.
 -- |
 -- | ```purescript
@@ -412,6 +437,28 @@ elemIndex x = findIndex (_ == x)
 -- |
 elemLastIndex :: forall a. Eq a => a -> Array a -> Maybe Int
 elemLastIndex x = findLastIndex (_ == x)
+
+-- | Find the first element for which a predicate holds.
+-- |
+-- | ```purescript
+-- | findIndex (contains $ Pattern "b") ["a", "bb", "b", "d"] = Just "bb"
+-- | findIndex (contains $ Pattern "x") ["a", "bb", "b", "d"] = Nothing
+-- | ```
+find :: forall a. (a -> Boolean) -> Array a -> Maybe a
+find f xs = unsafePartial (unsafeIndex xs) <$> findIndex f xs
+
+-- | Find the first element in a data structure which satisfies
+-- | a predicate mapping.
+findMap :: forall a b. (a -> Maybe b) -> Array a -> Maybe b
+findMap = findMapImpl Nothing isJust
+
+foreign import findMapImpl
+  :: forall a b
+   . (forall c. Maybe c)
+  -> (forall c. Maybe c -> Boolean)
+  -> (a -> Maybe b)
+  -> Array a
+  -> Maybe b
 
 -- | Find the first index for which a predicate holds.
 -- |
@@ -546,6 +593,21 @@ alterAt i f xs = maybe Nothing go (xs !! i)
 -- Transformations -------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+-- | Inserts the given element in between each element in the array. The array
+-- | must have two or more elements for this operation to take effect.
+-- |
+-- | ```purescript
+-- | intersperse " " [ "a", "b" ] == [ "a", " ", "b" ]
+-- | intersperse 0 [ 1, 2, 3, 4, 5 ] == [ 1, 0, 2, 0, 3, 0, 4, 0, 5 ]
+-- | ```
+-- |
+-- | If the array has less than two elements, the input array is returned.
+-- | ```purescript
+-- | intersperse " " [] == []
+-- | intersperse " " ["a"] == ["a"]
+-- | ```
+foreign import intersperse :: forall a. a -> Array a -> Array a
+
 -- | Reverse an array, creating a new array.
 -- |
 -- | ```purescript
@@ -596,6 +658,27 @@ foreign import partition
    . (a -> Boolean)
   -> Array a
   -> { yes :: Array a, no :: Array a }
+
+-- | Splits an array into two subarrays, where `before` contains the elements
+-- | up to (but not including) the given index, and `after` contains the rest
+-- | of the elements, from that index on.
+-- |
+-- | ```purescript
+-- | >>> splitAt 3 [1, 2, 3, 4, 5]
+-- | { before: [1, 2, 3], after: [4, 5] }
+-- | ```
+-- |
+-- | Thus, the length of `(splitAt i arr).before` will equal either `i` or
+-- | `length arr`, if that is shorter. (Or if `i` is negative the length will
+-- | be 0.)
+-- |
+-- | ```purescript
+-- | splitAt 2 ([] :: Array Int) == { before: [], after: [] }
+-- | splitAt 3 [1, 2, 3, 4, 5] == { before: [1, 2, 3], after: [4, 5] }
+-- | ```
+splitAt :: forall a. Int -> Array a -> { before :: Array a, after :: Array a }
+splitAt i xs | i <= 0 = { before: [], after: xs }
+splitAt i xs = { before: slice 0 i xs, after: slice i (length xs) xs }
 
 -- | Filter where the predicate returns a `Boolean` in some `Applicative`.
 -- |
@@ -657,7 +740,7 @@ mapWithIndex f xs = zipWith f (range 0 (length xs - 1)) xs
 -- |
 updateAtIndices :: forall t a. Foldable t => t (Tuple Int a) -> Array a -> Array a
 updateAtIndices us xs =
-  foldl (\xs' (Tuple i x) -> fromMaybe xs' (updateAt i x xs')) xs us
+  F.foldl (\xs' (Tuple i x) -> fromMaybe xs' (updateAt i x xs')) xs us
 
 -- | Apply a function to the element at the specified indices,
 -- | creating a new array. Out-of-bounds indices will have no effect.
@@ -670,13 +753,49 @@ updateAtIndices us xs =
 -- |
 modifyAtIndices :: forall t a. Foldable t => t Int -> (a -> a) -> Array a -> Array a
 modifyAtIndices is f xs =
-  foldl (\xs' i -> fromMaybe xs' (modifyAt i f xs')) xs is
+  F.foldl (\xs' i -> fromMaybe xs' (modifyAt i f xs')) xs is
+
+foldl :: forall a b. (b -> a -> b) -> b -> Array a -> b
+foldl = F.foldl
+
+foldr :: forall a b. (a -> b -> b) -> b -> Array a -> b
+foldr = F.foldr
+
+foldMap :: forall a m. Monoid m => (a -> m) -> Array a -> m
+foldMap = F.foldMap
+
+fold :: forall m. Monoid m => Array m -> m
+fold = F.fold
+
+intercalate :: forall a. Monoid a => a -> Array a -> a
+intercalate = F.intercalate
+
+-- | Fold a data structure from the left, keeping all intermediate results
+-- | instead of only the final result. Note that the initial value does not
+-- | appear in the result (unlike Haskell's `Prelude.scanl`).
+-- |
+-- | ```
+-- | scanl (+) 0  [1,2,3] = [1,3,6]
+-- | scanl (-) 10 [1,2,3] = [9,7,4]
+-- | ```
+foreign import scanl :: forall a b. (b -> a -> b) -> b -> Array a -> Array b
+
+-- | Fold a data structure from the right, keeping all intermediate results
+-- | instead of only the final result. Note that the initial value does not
+-- | appear in the result (unlike Haskell's `Prelude.scanr`).
+-- |
+-- | ```
+-- | scanr (+) 0 [1,2,3] = [6,5,3]
+-- | scanr (flip (-)) 10 [1,2,3] = [4,5,7]
+-- | ```
+foreign import scanr :: forall a b. (a -> b -> b) -> b -> Array a -> Array b
 
 --------------------------------------------------------------------------------
 -- Sorting ---------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
 -- | Sort the elements of an array in increasing order, creating a new array.
+-- | Sorting is stable: the order of equal elements is preserved.
 -- |
 -- | ```purescript
 -- | sort [2, -3, 1] = [-3, 1, 2]
@@ -687,6 +806,8 @@ sort xs = sortBy compare xs
 
 -- | Sort the elements of an array in increasing order, where elements are
 -- | compared using the specified partial ordering, creating a new array.
+-- | Sorting is stable: the order of elements is preserved if they are equal
+-- | according to the specified partial ordering.
 -- |
 -- | ```purescript
 -- | compareLength a b = compare (length a) (length b)
@@ -694,15 +815,14 @@ sort xs = sortBy compare xs
 -- | ```
 -- |
 sortBy :: forall a. (a -> a -> Ordering) -> Array a -> Array a
-sortBy comp xs = sortImpl comp' xs
-  where
-  comp' x y = case comp x y of
-    GT -> 1
-    EQ -> 0
-    LT -> -1
+sortBy comp = sortByImpl comp case _ of
+  GT -> 1
+  EQ -> 0
+  LT -> -1
 
 -- | Sort the elements of an array in increasing order, where elements are
--- | sorted based on a projection
+-- | sorted based on a projection. Sorting is stable: the order of elements is
+-- | preserved if they are equal according to the projection.
 -- |
 -- | ```purescript
 -- | sortWith (_.age) [{name: "Alice", age: 42}, {name: "Bob", age: 21}]
@@ -712,7 +832,7 @@ sortBy comp xs = sortImpl comp' xs
 sortWith :: forall a b. Ord b => (a -> b) -> Array a -> Array a
 sortWith f = sortBy (comparing f)
 
-foreign import sortImpl :: forall a. (a -> a -> Int) -> Array a -> Array a
+foreign import sortByImpl :: forall a. (a -> a -> Ordering) -> (Ordering -> Int) -> Array a -> Array a
 
 --------------------------------------------------------------------------------
 -- Subarrays -------------------------------------------------------------------
@@ -739,7 +859,8 @@ foreign import slice :: forall a. Int -> Int -> Array a -> Array a
 -- | take 100 letters = ["a", "b", "c"]
 -- | ```
 -- |
-foreign import take :: forall a. Int -> Array a -> Array a
+take :: forall a. Int -> Array a -> Array a
+take n xs = if n < 1 then [] else slice 0 n xs
 
 -- | Keep only a number of elements from the end of an array, creating a new
 -- | array.
@@ -774,9 +895,10 @@ takeWhile p xs = (span p xs).init
 -- | drop 10 letters = []
 -- | ```
 -- |
-foreign import drop :: forall a. Int -> Array a -> Array a
+drop :: forall a. Int -> Array a -> Array a
+drop n xs = if n < 1 then xs else slice n (length xs) xs
 
--- | Drop a number of elements from the start of an array, creating a new array.
+-- | Drop a number of elements from the end of an array, creating a new array.
 -- |
 -- | ```purescript
 -- | letters = ["a", "b", "c", "d"]
@@ -835,21 +957,31 @@ span p arr =
 -- | Group equal, consecutive elements of an array into arrays.
 -- |
 -- | ```purescript
--- | group [1,1,2,2,1] == [NonEmpty 1 [1], NonEmpty 2 [2], NonEmpty 1 []]
+-- | group [1, 1, 2, 2, 1] == [NonEmptyArray [1, 1], NonEmptyArray [2, 2], NonEmptyArray [1]]
 -- | ```
 group :: forall a. Eq a => Array a -> Array (NonEmptyArray a)
 group xs = groupBy eq xs
 
--- | Sort and then group the elements of an array into arrays.
+-- | Group equal elements of an array into arrays.
 -- |
 -- | ```purescript
--- | group' [1,1,2,2,1] == [NonEmpty 1 [1,1],NonEmpty 2 [2]]
+-- | groupAll [1, 1, 2, 2, 1] == [NonEmptyArray [1, 1, 1], NonEmptyArray [2, 2]]
 -- | ```
-group' :: forall a. Ord a => Array a -> Array (NonEmptyArray a)
-group' = group <<< sort
+groupAll :: forall a. Ord a => Array a -> Array (NonEmptyArray a)
+groupAll = groupAllBy compare
+
+-- | Deprecated previous name of `groupAll`.
+group' :: forall a. Warn (Text "'group\'' is deprecated, use 'groupAll' instead") => Ord a => Array a -> Array (NonEmptyArray a)
+group' = groupAll
 
 -- | Group equal, consecutive elements of an array into arrays, using the
--- | specified equivalence relation to detemine equality.
+-- | specified equivalence relation to determine equality.
+-- |
+-- | ```purescript
+-- | groupBy (\a b -> odd a && odd b) [1, 3, 2, 4, 3, 3]
+-- |    = [NonEmptyArray [1, 3], NonEmptyArray [2], NonEmptyArray [4], NonEmptyArray [3, 3]]
+-- | ```
+-- |
 groupBy :: forall a. (a -> a -> Boolean) -> Array a -> Array (NonEmptyArray a)
 groupBy op = go []
   where
@@ -860,6 +992,17 @@ groupBy op = go []
       in go (((unsafeCoerce :: Array ~> NonEmptyArray) (o.head : sp.init)) : acc) sp.rest
     Nothing -> reverse acc
 
+
+-- | Group equal elements of an array into arrays, using the specified
+-- | comparison function to determine equality.
+-- |
+-- | ```purescript
+-- | groupAllBy (comparing Down) [1, 3, 2, 4, 3, 3]
+-- |    = [NonEmptyArray [4], NonEmptyArray [3, 3, 3], NonEmptyArray [2], NonEmptyArray [1]]
+-- | ```
+-- |
+groupAllBy :: forall a. (a -> a -> Ordering) -> Array a -> Array (NonEmptyArray a)
+groupAllBy cmp = groupBy (\x y -> cmp x y == EQ) <<< sortBy cmp
 
 -- | Remove the duplicates from an array, creating a new array.
 -- |
@@ -913,7 +1056,8 @@ nubBy comp xs = case head indexedAndSorted of
 -- | relation.
 -- |
 -- | ```purescript
--- | nubByEq (\a b -> a `mod` 3 == b `mod` 3) [1, 3, 4, 5, 6] = [1,3,5]
+-- | mod3eq a b = a `mod` 3 == b `mod` 3
+-- | nubByEq mod3eq [1, 3, 4, 5, 6] = [1, 3, 5]
 -- | ```
 -- |
 nubByEq :: forall a. (a -> a -> Boolean) -> Array a -> Array a
@@ -921,6 +1065,7 @@ nubByEq eq xs =
   case uncons xs of
     Just o -> o.head : nubByEq eq (filter (\y -> not (o.head `eq` y)) o.tail)
     Nothing -> []
+
 
 -- | Calculate the union of two arrays. Note that duplicates in the first array
 -- | are preserved while duplicates in the second array are removed.
@@ -1058,20 +1203,41 @@ zip = zipWith Tuple
 -- | Transforms a list of pairs into a list of first components and a list of
 -- | second components.
 unzip :: forall a b. Array (Tuple a b) -> Tuple (Array a) (Array b)
-unzip = uncons' (\_ -> Tuple [] []) \(Tuple a b) ts -> case unzip ts of
+unzip = unconsImpl (\_ -> Tuple [] []) \(Tuple a b) ts -> case unzip ts of
   Tuple as bs -> Tuple (a : as) (b : bs)
+
+-- | Returns true if at least one array element satisfies the given predicate,
+-- | iterating the array only as necessary and stopping as soon as the predicate
+-- | yields true.
+-- |
+-- | ```purescript
+-- | any (_ > 0) [] = False
+-- | any (_ > 0) [-1, 0, 1] = True
+-- | any (_ > 0) [-1, -2, -3] = False
+-- | ```
+foreign import any :: forall a. (a -> Boolean) -> Array a -> Boolean
+
+-- | Returns true if all the array elements satisfy the given predicate.
+-- | iterating the array only as necessary and stopping as soon as the predicate
+-- | yields false.
+-- |
+-- | ```purescript
+-- | all (_ > 0) [] = True
+-- | all (_ > 0) [1, 2, 3] = True
+-- | all (_ > 0) [-1, -2, -3] = False
+-- | ```
+foreign import all :: forall a. (a -> Boolean) -> Array a -> Boolean
 
 -- | Perform a fold using a monadic step function.
 -- |
 -- | ```purescript
 -- | foldM (\x y -> Just (x + y)) 0 [1, 4] = Just 5
 -- | ```
--- |
-foldM :: forall m a b. Monad m => (a -> b -> m a) -> a -> Array b -> m a
-foldM f a = uncons' (\_ -> pure a) (\b bs -> f a b >>= \a' -> foldM f a' bs)
+foldM :: forall m a b. Monad m => (b -> a -> m b) -> b -> Array a -> m b
+foldM f b = unconsImpl (\_ -> pure b) (\a as -> f b a >>= \b' -> foldM f b' as)
 
-foldRecM :: forall m a b. MonadRec m => (a -> b -> m a) -> a -> Array b -> m a
-foldRecM f a array = tailRecM2 go a 0
+foldRecM :: forall m a b. MonadRec m => (b -> a -> m b) -> b -> Array a -> m b
+foldRecM f b array = tailRecM2 go b 0
   where
   go res i
     | i >= length array = pure (Done res)

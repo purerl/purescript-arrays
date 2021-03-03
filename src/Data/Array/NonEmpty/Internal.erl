@@ -1,13 +1,22 @@
 -module(data_array_nonEmpty_internal@foreign).
--export([fold1Impl/2, traverse1Impl/4]).
+-export([foldl1Impl/2, foldr1Impl/2, traverse1Impl/4]).
 
-fold1Impl1(F, A, Acc, I, N) when I < N ->
-    fold1Impl1(F, A, (F(Acc))(array:get(I, A)), I+1, N);
-fold1Impl1(_,_,Acc,_,_) -> Acc.
 
-fold1Impl(F, A) ->
+foldl1Impl(F, A) ->
     Length = array:size(A),
-    fold1Impl1(F, A, array:get(0, A), 1, Length).
+    foldl1Impl_(F, A, array:get(0, A), 1, Length).
+
+foldl1Impl_(F, A, Acc, I, N) when I < N ->
+    foldl1Impl_(F, A, (F(Acc))(array:get(I, A)), I+1, N);
+foldl1Impl_(_,_,Acc,_,_) -> Acc.
+
+foldr1Impl(F, A) ->
+    Length = array:size(A),
+    foldr1Impl_(F, A, array:get(Length-1, A), Length-2).
+
+foldr1Impl_(F, A, Acc, I) when I >= 0 ->
+    foldr1Impl_(F, A, (F(array:get(I, A)))(Acc), I-1);
+foldr1Impl_(_,_,Acc,_) -> Acc.
 
 traverse1Impl(Apply, Map, F, A) ->
     Len = array:size(A),
